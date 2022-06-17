@@ -1,4 +1,4 @@
-# MuSiC-ViT (Hijacking Radiologic Process via Multi-task Siamese Convolutional Vision Transformer for Chest X-Ray Follow-Up)
+# MuSiC-ViT: Multi-task Siamese Convolutional Vision Transformer for Differentiating Change or No-change of Follow-Up Chest X-Rays
 
 ---
 
@@ -47,3 +47,5 @@ CUDA_VISIBLE_DEVICES=0 python test.py --msg=test --batch_size=6 --pretrained che
 MuSiC-ViT weight link: https://drive.google.com/file/d/1uJsrFra0hsL90Guz5vHuhy1BGebt4gc-/view?usp=sharing
 
 Pre-trained UNet weight link: https://drive.google.com/file/d/1pxf0gTiDZyYFHOKhW16-K09i9Or4n5jx/view?usp=sharing
+
+CheXpert dataset link: https://drive.google.com/drive/folders/1wD_LI0mPlQWNWS47L44w2guuk4aHNmw-?usp=sharing
