@@ -3,9 +3,9 @@ import sys
 import random
 import numpy as np
 from config import parse_arguments
-from datasets_with_UNet import ClassPairDataset
+from datasets import ClassPairDataset
 
-from models.siamese_CMT_with_UNet_ACM import siamese_CMT_with_UNet_ACM
+from models.siamese_CMT_ACM import siamese_CMT_ACM
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,9 +23,6 @@ import torch.utils.data
 from torchvision.utils import save_image
 from tqdm import tqdm
 
-from gradcam import *
-from cam_utils import *
-
 
 def calculate_parameters(model):
     return sum(param.numel() for param in model.parameters())/1000000.0
@@ -34,7 +31,6 @@ def ACM_loss(logit):
     return 2-(2*logit)
 
 def train(args, data_loader, test_loader_in, model, grad_cam ,optimizer, device, writer, log_dir, checkpoint_dir):
-    
     model.train()
     correct = 0
     total = 0
@@ -50,36 +46,13 @@ def train(args, data_loader, test_loader_in, model, grad_cam ,optimizer, device,
         running_change = 0
         running_disease = 0
 
-        for base, fu, base_HE, fu_HE, change_labels, disease_labels, _ in iter(data_loader):
-
-
+        for base, fu, change_labels, disease_labels, _ in iter(data_loader):
             base = base.to(device)
             fu = fu.to(device)
-            
-            base_HE = base_HE.to(device)
-            fu_HE = fu_HE.to(device)
-            
-            '''
-            Unet encoder cam map add
-            '''
-            base_cam_result = torch.zeros_like(base)
-            fu_cam_result = torch.zeros_like(fu)
-            B = base.shape[0]
-            
-            for i in range(B):
-                grayscale_cam_base, _ = grad_cam(base_HE[i:i+1,...])
-                if torch.isnan(grayscale_cam_base).any():
-                    grayscale_cam_base = torch.zeros_like(grayscale_cam_base).to(device)
-                base_cam_result[i,...] = (grayscale_cam_base)
-
-                grayscale_cam_fu, _ = grad_cam(fu_HE[i:i+1,...])
-                if torch.isnan(grayscale_cam_fu).any():
-                    grayscale_cam_fu = torch.zeros_like(grayscale_cam_fu).to(device)
-                fu_cam_result[i,...] = (grayscale_cam_fu)
-                
+        
             change_labels = change_labels.to(device)
             disease_labels = [disease_labels[0].to(device), disease_labels[1].to(device)]
-            base_embed, fu_embed, outputs, matching = model(base, fu , base_cam_result, fu_cam_result)
+            base_embed, fu_embed, outputs, matching = model(base, fu)
 
             _, preds = outputs.max(1)
             total += change_labels.size(0)
@@ -119,21 +92,10 @@ def train(args, data_loader, test_loader_in, model, grad_cam ,optimizer, device,
                 writer.add_scalar('disease_loss', running_disease/iter_, overall_iter)
                 writer.add_scalar('train_acc', 100.*correct/total, overall_iter)
 
-            if (iter_ % 3000 == 0) & (iter_ != 0):
-                
-                test_in(args, test_loader_in, model, grad_cam, device, writer, log_dir, checkpoint_dir, overall_iter)
-                
-                torch.save({
-                    'epoch' : epoch,
-                    'iter' : overall_iter,
-                    'state_dict' : model.state_dict(),
-                    'optimizer' : optimizer.state_dict(),
-                    }, os.path.join(checkpoint_dir, str(overall_iter)) + '.pth')
-
             iter_ += 1
             overall_iter += 1
 
-        test_in(args, test_loader_in, model, grad_cam, device, writer, log_dir, checkpoint_dir, overall_iter)
+        test(args, test_loader_in, model, grad_cam, device, writer, log_dir, checkpoint_dir, overall_iter)
         torch.save({
             'epoch' : epoch + 1,
             'iter' : overall_iter,
@@ -142,39 +104,21 @@ def train(args, data_loader, test_loader_in, model, grad_cam ,optimizer, device,
             }, os.path.join(checkpoint_dir, str(overall_iter)) + '.pth')
 
 
-def test_in(args, data_loader, model, grad_cam, device, writer, log_dir, checkpoint_dir, iter_):
+def test(args, data_loader, model, device, writer, log_dir, checkpoint_dir, iter_):
     print('[*] Test Phase')
     model.eval()
     model.requires_grad_(False)
     correct = 0
     total = 0
     
-    for base, fu, base_HE, fu_HE, change_labels, disease_labels,_ in iter(data_loader):
-        
-        base = base.to(device)
-        fu = fu.to(device)
-        base_HE = base_HE.to(device)
-        fu_HE = fu_HE.to(device)
-        
-        change_labels = change_labels.to(device)
-        disease_labels = [disease_labels[0].to(device), disease_labels[1].to(device)]
-        
-        '''
-        Unet encoder cam map add
-        '''
-        base_cam_result = torch.zeros_like(base)
-        fu_cam_result = torch.zeros_like(fu)
-        B = base.shape[0]
-        
-        for i in range(B):
-            grayscale_cam_base, _ = grad_cam(base_HE[i:i+1,...])
-            base_cam_result[i,...] = grayscale_cam_base
-            grayscale_cam_fu, _ = grad_cam(fu_HE[i:i+1,...])
-            fu_cam_result[i,...] = grayscale_cam_fu
+    with torch.no_grad():
+        for base, fu, change_labels, disease_labels, patient_name in iter(data_loader):
 
-        with torch.no_grad():
-            
-            _, _, outputs, _ = model(base, fu, base_cam_result, fu_cam_result)
+            base = base.to(device)
+            fu = fu.to(device)
+                
+            change_labels = change_labels.to(device)
+            _, _, outputs, _ = model(base, fu)
             _, preds = outputs.max(1)
             preds_cpu = preds.cpu().numpy().tolist()
 
@@ -184,13 +128,12 @@ def test_in(args, data_loader, model, grad_cam, device, writer, log_dir, checkpo
             
             labels_cpu = change_labels.cpu().numpy().tolist()
     
-    print('[*] Test Acc: {:5f}'.format(100.*correct/total))
-    writer.add_scalar('Test acc', 100.*correct/total, iter_)
+        print('[*] Test Acc: {:5f}'.format(100.*correct/total))
+        writer.add_scalar('Test acc', 100.*correct/total, iter_)
 
     model.train()
     model.requires_grad_(True)
     
-
 def main(args):
     if args.random_seed is not None:
         random.seed(args.random_seed)
@@ -247,12 +190,8 @@ def main(args):
     num_workers=4, pin_memory=False, shuffle=False)
     
     # select network
-    print('[*] build network...')
-    unet_model = torch.load('./radiography_model/best_model.pth')
-    
-    # select network
-    if args.backbone =='CMT_Ti':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
+    print('[*] build network...')    
+    model = siamese_CMT_ACM(in_channels = 1,
                             stem_channels = 16,
                             cmt_channelses = [46, 92, 184, 368],
                             pa_channelses = [46, 92, 184, 368],
@@ -263,53 +202,15 @@ def main(args):
                             patch_ker=2,
                             patch_str=2,
                             num_classes = 2)
-        
-    elif args.backbone == 'CMT_XS':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 16,
-                            cmt_channelses = [52, 104, 208, 416],
-                            pa_channelses = [52, 104, 208, 416],
-                            R = 3.8,
-                            repeats = [3, 3, 12, 3],
-                            input_size = 512,
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
-        
-    elif args.backbone == 'CMT_S':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 32,
-                            cmt_channelses = [64, 128, 256, 512],
-                            pa_channelses = [64, 128, 256, 512],
-                            R = 4.,
-                            repeats = [3, 3, 16, 3],
-                            input_size = 512,
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
     
-    elif args.backbone == 'CMT_B':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 38,
-                            cmt_channelses = [76, 152, 304, 608],
-                            pa_channelses = [76, 152, 304, 608],
-                            R = 4.,
-                            repeats = [4, 4, 20, 4],
-                            input_size = 512,
-                            sizes = [128, 64, 32, 16],
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
             
     print("[*] Loading model")
     print(('[i] Total model params: %.2fM'%(calculate_parameters(model))))
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-        unet_model = nn.DataParallel(unet_model)
 
     model = model.to(device)
-    unet_model = unet_model.to(device)
 
     if torch.cuda.device_count() > 1:
         optimizer = torch.optim.AdamW(model.module.parameters(), lr = args.lr,
@@ -317,14 +218,6 @@ def main(args):
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr = args.lr,
             weight_decay = args.weight_decay)
-    
-    if torch.cuda.device_count() > 1:
-        target_layer = unet_model.module.encoder.features.denseblock4.denselayer16.conv2
-    else:
-        target_layer = unet_model.encoder.features.denseblock4.denselayer16.conv2
-
-    model_dict = {'type': 'resnet', 'layer_name': target_layer, 'arch': unet_model}
-    grad_cam = Grad_CAM(model_dict)
 
     if args.resume is True:
         checkpoint = torch.load(args.pretrained)
@@ -341,7 +234,7 @@ def main(args):
     # training
     print('[*] start training...')
     summary_writer = SummaryWriter(log_dir)
-    train(args, train_loader, test_loader_in, model,  grad_cam , optimizer, device, summary_writer, log_dir, checkpoint_dir)
+    train(args, train_loader, test_loader_in, model, optimizer, device, summary_writer, log_dir, checkpoint_dir)
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 
 ---
 
-![Figure_final_main](https://user-images.githubusercontent.com/46750574/173975319-6f36e80a-627f-4856-921c-6aca52b737c8.png)
+![Figure_final_main](./image/Figure_final_main.png)
 
 ## Directory Architecture
 
@@ -14,7 +14,7 @@ Root
 
 |---------- config.py
 
-|---------- datasets_with_UNet.py
+|---------- datasets.py
 
 |---------- README.md
 
@@ -23,10 +23,6 @@ Root
 |---------- train.py
 
 |---------- utils.py
-
-|---------- cam_utils.py
-
-|---------- gradcam.py
 
 |---------- runs (if you run the train code, it will be made automatically)
 
@@ -41,11 +37,9 @@ CUDA_VISIBLE_DEVICES=0 python train.py --msg=train--aug True --lr 6e-5 --batch_s
 ## Test
 
 ```
-CUDA_VISIBLE_DEVICES=0 python test.py --msg=test --batch_size=6 --pretrained checkpoints/2020-10-13_113615_sgd_change+disease+orth_res152_real/20306.pth --backbone CMT_Ti
+CUDA_VISIBLE_DEVICES=0 python test.py --msg=test --batch_size=6 --pretrained checkpoints/2022-08-25_163910_MuSiC_ViT/174048.pth --backbone CMT_Ti
 ```
 
-MuSiC-ViT weight link: https://drive.google.com/file/d/1uJsrFra0hsL90Guz5vHuhy1BGebt4gc-/view?usp=sharing
-
-Pre-trained UNet weight link: https://drive.google.com/file/d/1pxf0gTiDZyYFHOKhW16-K09i9Or4n5jx/view?usp=sharing
+MuSiC-ViT weight link: https://drive.google.com/drive/folders/1TZYdh4ERKBXa_-OH0LWxofGAsGWDc3_H?usp=sharing
 
 CheXpert dataset link: https://drive.google.com/drive/folders/1wD_LI0mPlQWNWS47L44w2guuk4aHNmw-?usp=sharing
