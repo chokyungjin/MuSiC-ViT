@@ -2,11 +2,17 @@ import os
 import sys
 import numpy as np
 import torch
+import random
+import glob
+
 from torch.utils.data import Dataset
+
 import torchvision
 import torchvision.transforms as transforms
+
 from config import parse_arguments
 from PIL import Image
+
 import json
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -15,17 +21,20 @@ from skimage import exposure
 
 
 class ClassPairDataset(Dataset):
-    def __init__(self, input_path, dataset, mode, margin=None, sample_data=None, fov=None, mean=0.2, std=0.4, aug=None,transform=None):
-        
+    def __init__(self, input_path, dataset, mode, margin=False, sample_data=None, fov=False, mean=0.2, std=0.4, aug=False,transform=None):
         if dataset == 'toy':
             input_path = input_path + '_toy'
         
+        self.input_path = os.path.join(input_path, '{}set/512'.format(mode))
+        self.disease_label_path = os.path.join(input_path, 'label_csv/disease.json')
         self.aug = aug
         self.fov = fov
         self.mean = mean
         self.std = std
         self.sample_data = sample_data
         self.margin = margin
+        with open(self.disease_label_path, "r") as f:
+            self.disease_label = json.load(open(self.disease_label_path))
         
         if self.margin is not None:
             print("[*] Margin true")
@@ -36,20 +45,23 @@ class ClassPairDataset(Dataset):
             if self.sample_data is not None:
                 print("[*] Sample data loaded")
                 json_name = './json/4class_datasets_{}_sample_512_fov_{}.json'.format(dataset,mode)
+                #json_name = './json/4class_datasets_{}_512_fov_{}_Supcon_sampling.json'.format(dataset,mode)
+                # json_name = './json/4class_datasets_{}_512_fov_{}_Supcon_sampling_change_predict.json'.format(dataset,mode)
             else:
                 json_name = './json/4class_datasets_{}_512_fov_{}.json'.format(dataset,mode)
-                
+                # json_name = './json/internval_validation_add_fov.json'  # ER
         else:
-            print("FOV false")
             json_name = './json/4class_datasets_{}_512_{}.json'.format(dataset,mode)
-            
         if os.path.exists(json_name) is True:
             print('[*] {} is already exist. Loading Json from {}'.format(json_name, json_name))
             with open(json_name, "r") as f:
                 self.samples = json.load(f)
         else:
-            print('[*] There is no {}. You have to make new Json'.format(json_name, json_name))
-            
+            print('[*] There is no {}. Start making new Json'.format(json_name, json_name))
+            self.samples = self._make_dataset(mode)
+            with open(json_name, "w") as f:
+                json.dump(self.samples, f)
+        
         if mode == 'train':
             if self.aug is not None:
                 print("[*] Augmentation On")
@@ -90,7 +102,7 @@ class ClassPairDataset(Dataset):
                 A.Normalize(mean=(self.mean,), std=(self.std,)),
                 ToTensorV2(),
                 ], additional_targets={'image0': 'image' , 'image1': 'image' , 'image2': 'image'})
-
+                
     def _find_disease_label(self, exam_id):
         if exam_id in self.disease_label['normal']:
             return 0 #normal
@@ -141,75 +153,43 @@ class ClassPairDataset(Dataset):
         return [x_start, x_end, y_start, y_end]
 
     def __getitem__(self, idx):
-
         if self.fov is not None:
             if self.margin is not None:
                 x_min, _, y_min, y_max = self._check_crop_label_margin(self.samples['fov'][idx][0])
             else:
                 x_min, _, y_min, y_max = self._check_crop_label(self.samples['fov'][idx][0])
-            base_img = np.array(Image.open(self.samples['imgs'][idx][0]))
-            base_img_unet = base_img.copy()
-            
-            base_img_2 = exposure.equalize_hist(base_img_unet)*255
-            base_img_2 = np.clip(base_img_2, 0, 255).astype(np.uint8)
-            
+            base_img = np.array(Image.open(self.samples['imgs'][idx][0])) 
             base_img = base_img[x_min:, y_min:y_max]
-            base_img_2 = base_img_2[x_min:, y_min:y_max]
             
             if self.margin is not None:
                 x_min, _, y_min, y_max = self._check_crop_label_margin(self.samples['fov'][idx][1])
             else:
                 x_min, _, y_min, y_max = self._check_crop_label(self.samples['fov'][idx][1])
             pair_img = np.array(Image.open(self.samples['imgs'][idx][1]))
-            pair_img_unet = pair_img.copy()
-            
-            pair_img_2 = exposure.equalize_hist(pair_img_unet)*255
-            pair_img_2 = np.clip(pair_img_2, 0, 255).astype(np.uint8)
-            
             pair_img = pair_img[x_min:, y_min:y_max]
-            pair_img_2 = pair_img_2[x_min:, y_min:y_max]
-            
         else:
             base_img = np.array(Image.open(self.samples['imgs'][idx][0]))
-            base_img_unet = base_img.copy()
+            pair_img = np.array(Image.open(self.samples['imgs'][idx][1]))
             
-            base_img_2 = exposure.equalize_hist(base_img_unet)*255
-            base_img_2 = np.clip(base_img_2, 0, 255).astype(np.uint8)
-            
-            pair_img = np.array(Image.open(self.samples['imgs'][idx][1])) 
-            pair_img_unet = pair_img.copy()
-            
-            pair_img_2 = exposure.equalize_hist(pair_img_unet)*255
-            pair_img_2 = np.clip(pair_img_2, 0, 255).astype(np.uint8)
+        transformed = self.transform(image=base_img, image0=pair_img)
         
-        transformed = self.transform(image=base_img, image0=pair_img, image1=base_img_2, image2=pair_img_2)
-
         base_img = transformed['image']
         base_img = self._catch_exception(base_img)
 
         pair_img = transformed['image0']
         pair_img = self._catch_exception(pair_img)
         
-        
-        base_img_2 = transformed['image1']
-        base_img_2 = self._catch_exception(base_img_2)
-
-        pair_img_2 = transformed['image2']
-        pair_img_2 = self._catch_exception(pair_img_2)
-
         change_labels = self.samples['change_labels'][idx]
         disease_labels = self.samples['disease_labels'][idx]
-        patient_name = self.samples['imgs'][idx][0]
+        patient_name = self.samples['imgs'][idx][0]#.split('/')[-2]
         
-        return base_img, pair_img, base_img_2, pair_img_2, change_labels, disease_labels, patient_name
+        return base_img, pair_img, change_labels, disease_labels, patient_name
             
     def __len__(self):
         return len(self.samples['change_labels'])
     
     def _catch_exception(self, img):
         return img[0, :, :].unsqueeze(0) if img.shape[0] == 3 else img
-    def _catch_exception_mask(self, img):
-        return img[:,:,0].unsqueeze(0)
 
     def _get_change_label_num(self, label, label_list):
         specific_labels = []
@@ -238,8 +218,5 @@ class ClassPairDataset(Dataset):
                     )
                     )
                     
-
-
-        
 if __name__ == '__main__':
     args = parse_arguments(sys.argv[1:])

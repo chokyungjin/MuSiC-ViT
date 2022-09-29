@@ -3,9 +3,9 @@ import os
 import random
 import numpy as np
 from config import parse_arguments
-from datasets_with_UNet import ClassPairDataset
+from datasets import ClassPairDataset
 
-from models.siamese_CMT_with_UNet_ACM import siamese_CMT_with_UNet_ACM
+from models.siamese_CMT_ACM import siamese_CMT_ACM
 
 import torch
 import torch.nn as nn
@@ -24,7 +24,6 @@ from sklearn.metrics import roc_auc_score
 import json
 import itertools
 from utils import *
-from gradcam import *
 
 def test(args, data_loader, model, grad_cam, device, log_dir):
 
@@ -39,54 +38,23 @@ def test(args, data_loader, model, grad_cam, device, log_dir):
     overall_gt = []
     overall_pat = []
     iter_ = 0
-
     idx = 0
 
-    for base, fu, base_2, fu_2, labels, patient_name in tqdm(iter(data_loader)):
+    for base, fu, labels, patient_name in tqdm(iter(data_loader)):
         
         base = base.to(device)
         fu = fu.to(device)
-        
-        if args.hist_equal == 'True':
-            base_2 = base_2.to(device)
-            fu_2 = fu_2.to(device)
-        else:
-            base_2 = base
-            fu_2 = fu
-            
+                    
         labels = labels.to(device)
-        
-        '''
-        Unet encoder cam map add
-        '''
-        base_cam_result = torch.zeros_like(base)
-        fu_cam_result = torch.zeros_like(fu)
-        B = base.shape[0]
-                
-        for i in range(B):
-            grayscale_cam_base, _ = grad_cam(base_2[i:i+1,...])
-            if torch.isnan(grayscale_cam_base).any():
-                grayscale_cam_base = torch.zeros_like(grayscale_cam_base).to(device)
-            base_cam_result[i,...] = (grayscale_cam_base)
-
-            grayscale_cam_fu, _ = grad_cam(fu_2[i:i+1,...])
-            if torch.isnan(grayscale_cam_fu).any():
-                grayscale_cam_fu = torch.zeros_like(grayscale_cam_fu).to(device)
-            fu_cam_result[i,...] = (grayscale_cam_fu)
             
         with torch.no_grad():
-            _, _, outputs, _ = model(base, fu, base_cam_result, fu_cam_result)
+            _, _, outputs, _ = model(base, fu)
             outputs = F.softmax(outputs, dim=1)
             _, preds = outputs.max(1)
 
             new_labels = []
             for i in range(labels.shape[0]):
-                if np.isnan(outputs[i, 1].cpu().detach().item()).any():
-                    out = 0
-                else:
-                    out = outputs[i, 1].cpu().detach().item()
-                    
-                new_labels.append(out)
+                new_labels.append(outputs[i, 1].cpu().detach().item())
 
             preds_cpu = preds.cpu().detach().numpy().tolist()
             labels_cpu = labels.cpu().detach().numpy().tolist()
@@ -99,7 +67,6 @@ def test(args, data_loader, model, grad_cam, device, log_dir):
             correct += preds.eq(labels).sum().item()
         
         iter_ += 1
-
         idx += base.shape[0]
     
     print('[*] Test Acc: {:5f}'.format(100.*correct/total))
@@ -155,11 +122,7 @@ def main(args):
     # select network
     
     print('[*] build network...')
-    unet_model = torch.load('./radiography_model/best_model.pth')
-
-    # select network
-    if args.backbone =='CMT_Ti':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
+    model = siamese_CMT_ACM(in_channels = 1,
                             stem_channels = 16,
                             cmt_channelses = [46, 92, 184, 368],
                             pa_channelses = [46, 92, 184, 368],
@@ -170,70 +133,20 @@ def main(args):
                             patch_ker=2,
                             patch_str=2,
                             num_classes = 2)
-        
-    elif args.backbone == 'CMT_XS':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 16,
-                            cmt_channelses = [52, 104, 208, 416],
-                            pa_channelses = [52, 104, 208, 416],
-                            R = 3.8,
-                            repeats = [3, 3, 12, 3],
-                            input_size = 512,
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
-        
-    elif args.backbone == 'CMT_S':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 32,
-                            cmt_channelses = [64, 128, 256, 512],
-                            pa_channelses = [64, 128, 256, 512],
-                            R = 4.,
-                            repeats = [3, 3, 16, 3],
-                            input_size = 512,
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
-    
-    elif args.backbone == 'CMT_B':
-        model = siamese_CMT_with_UNet_ACM(in_channels = 2,
-                            stem_channels = 38,
-                            cmt_channelses = [76, 152, 304, 608],
-                            pa_channelses = [76, 152, 304, 608],
-                            R = 4.,
-                            repeats = [4, 4, 20, 4],
-                            input_size = 512,
-                            sizes = [128, 64, 32, 16],
-                            patch_ker=2,
-                            patch_str=2,
-                            num_classes = 2)
 
     print("[*] model")
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-        unet_model = nn.DataParallel(unet_model)
 
-    model = model.to(device)
-    unet_model = unet_model.to(device)
-    
+    model = model.to(device)  
 
     if torch.cuda.device_count() > 1:
         optimizer = torch.optim.AdamW(model.module.parameters(), lr = args.lr,
             weight_decay = args.weight_decay)
-    
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr = args.lr,
             weight_decay = args.weight_decay)
-
-    
-    if torch.cuda.device_count() > 1:
-        target_layer = unet_model.module.encoder.features.denseblock4.denselayer16.conv2
-    else:
-        target_layer = unet_model.encoder.features.denseblock4.denselayer16.conv2
-
-    model_dict = {'type': 'resnet', 'layer_name': target_layer, 'arch': unet_model}
-    grad_cam = Grad_CAM(model_dict)
 
     if args.pretrained is not None:
         checkpoint = torch.load(args.pretrained)
@@ -245,7 +158,7 @@ def main(args):
         optimizer.load_state_dict(checkpoint['optimizer'])
         print("[*] checkpoint load completed")
     
-    test(args, test_loader, model, grad_cam, device, log_dir)
+    test(args, test_loader, model, device, log_dir)
 
 if __name__ == '__main__':
     argv = parse_arguments(sys.argv[1:])
