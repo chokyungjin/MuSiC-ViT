@@ -45,11 +45,8 @@ class ClassPairDataset(Dataset):
             if self.sample_data is not None:
                 print("[*] Sample data loaded")
                 json_name = './json/4class_datasets_{}_sample_512_fov_{}.json'.format(dataset,mode)
-                #json_name = './json/4class_datasets_{}_512_fov_{}_Supcon_sampling.json'.format(dataset,mode)
-                # json_name = './json/4class_datasets_{}_512_fov_{}_Supcon_sampling_change_predict.json'.format(dataset,mode)
             else:
                 json_name = './json/4class_datasets_{}_512_fov_{}.json'.format(dataset,mode)
-                # json_name = './json/internval_validation_add_fov.json'  # ER
         else:
             json_name = './json/4class_datasets_{}_512_{}.json'.format(dataset,mode)
         if os.path.exists(json_name) is True:
