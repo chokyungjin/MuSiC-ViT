@@ -44,8 +44,6 @@ class ACMBlock(nn.Module):
     def _get_orth_loss(self, K, Q):
         cos = nn.CosineSimilarity(dim=1, eps=1e-6)
         orth_loss = cos(K, Q)
-        # orth_loss = orth_loss ** 2  # cos 0
-        # orth_loss = abs(orth_loss)  # cos 0
         orth_loss = t.mean(orth_loss, dim=0)
         return orth_loss
     
@@ -80,22 +78,12 @@ class ACMBlock(nn.Module):
         channel_weights1 = self.global_pooling(mean_x1)
         channel_weights2 = self.global_pooling(mean_x2)
         
-        
-        # original ACM
         out1 = x1 + K - Q
         out2 = x2 + K - Q
-        
-        # MuSiC-ViT
-        # out1 = x1 + K + Q
-        # out2 = x2 + K + Q
         
         out1 = channel_weights1 * out1
         out2 = channel_weights2 * out2
         
-        # original ACM
-        # orth_loss = self._get_orth_loss_ACM(K,Q,c)
-        
-        # MuSiC-ViT
         orth_loss = self._get_orth_loss(K,Q)
 
         return out1, out2, orth_loss
